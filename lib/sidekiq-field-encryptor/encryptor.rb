@@ -48,20 +48,33 @@ module SidekiqFieldEncryptor
     end
 
     def process_message(message)
-      fields = @encrypted_fields[message['class']]
-      return unless fields
+      logger.info message.to_s
+
+      job_class = message['wrapped']
+      return unless job_config_data = @encrypted_fields[job_class]
+      sidekiq_job_arguments = message['args'].first.fetch('arguments', [])
+
+      # raise an error unless encryption is configured
       assert_key_configured
-      message['args'].size.times.each do |arg_index|
-        to_encrypt = fields[arg_index]
-        next unless to_encrypt
-        raw_value = message['args'][arg_index]
-        if to_encrypt == true
-          message['args'][arg_index] = yield(raw_value)
-        elsif to_encrypt.is_a?(Array) && raw_value.is_a?(Hash)
-          message['args'][arg_index] = Hash[raw_value.map do |key, value|
-            value = yield(value) if to_encrypt.member?(key.to_s)
-            [key, value]
-          end]
+
+      job_config_data.each do |arg_index, subfield_data|
+        next unless sidekiq_job_arguments[arg_index]
+        if subfield_data == true
+          sidekiq_job_arguments[arg_index] = yield(sidekiq_job_arguments[arg_index])
+        elsif subfield_data.is_a? Array
+          case sidekiq_job_arguments[arg_index]
+          when Hash # Encrypt only the protected fields in the hash
+            subfield_data.each do |subfield|
+              sidekiq_job_arguments[arg_index][subfield] =
+                yield(sidekiq_job_arguments[arg_index][subfield])
+            end
+          when Array # Assumes argument is an array of hashes that each have protected field(s)
+            sidekiq_job_arguments[arg_index].each do |arg|
+              subfield_data.each do |subfield|
+                arg[subfield] = yield(arg[subfield])
+              end
+            end
+          end
         end
       end
     end
