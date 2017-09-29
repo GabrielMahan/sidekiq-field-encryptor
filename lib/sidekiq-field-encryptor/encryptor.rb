@@ -48,8 +48,6 @@ module SidekiqFieldEncryptor
     end
 
     def process_message(message)
-      logger.info message.to_s
-
       job_class = message['wrapped']
       return unless job_config_data = @encrypted_fields[job_class]
       sidekiq_job_arguments = message['args'].first.fetch('arguments', [])
